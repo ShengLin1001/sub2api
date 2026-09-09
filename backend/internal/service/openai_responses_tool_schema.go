@@ -34,7 +34,7 @@ func shouldRepairOpenAIResponsesNullToolSchemaType(platform string) bool {
 }
 
 // shouldSanitizeOpenAIResponsesToolSchemaPatterns is intentionally narrower:
-// regex lookaround rejection is an OpenAI-specific schema constraint.
+// regex construct rejection is an OpenAI-specific schema constraint.
 func shouldSanitizeOpenAIResponsesToolSchemaPatterns(platform string) bool {
 	return platform == PlatformOpenAI
 }
@@ -66,14 +66,14 @@ func sanitizeOpenAIResponsesToolSchemasForPlatform(body []byte, platform string)
 }
 
 // sanitizeOpenAIResponsesToolSchemaPatterns removes only schema constraints
-// containing regex lookaround, which OpenAI rejects. It deliberately does not
-// descend into instance-valued keywords such as default, examples, const, or
-// enum.
+// whose regex uses a construct OpenAI rejects (lookaround, or a Unicode
+// property escape). It deliberately does not descend into instance-valued
+// keywords such as default, examples, const, or enum.
 func sanitizeOpenAIResponsesToolSchemaPatterns(body []byte) ([]byte, bool, error) {
-	if len(body) == 0 || !openAIResponsesBodyMayContainRegexLookaround(body) {
+	if len(body) == 0 || !openAIResponsesBodyMayContainUnsupportedRegex(body) {
 		return body, false, nil
 	}
-	return sanitizeOpenAIResponsesToolSchemas(body, openAIResponsesToolSchemaOptions{removeLookaroundPatterns: true})
+	return sanitizeOpenAIResponsesToolSchemas(body, openAIResponsesToolSchemaOptions{removeUnsupportedPatterns: true})
 }
 
 // sanitizeOpenAIResponsesToolParameterTypes replaces an explicitly null type
@@ -91,20 +91,28 @@ func sanitizeOpenAIResponsesToolParameterTypes(body []byte) ([]byte, bool, error
 	})
 }
 
-func openAIResponsesBodyMayContainRegexLookaround(body []byte) bool {
+func openAIResponsesBodyMayContainUnsupportedRegex(body []byte) bool {
 	// An opening parenthesis may be literal or encoded as JSON's canonical
-	// Unicode escape. Other lookaround characters may themselves be escaped, so
+	// Unicode escape; a Unicode property escape always leaves a literal "p{" /
+	// "P{" in the JSON bytes. Other characters may themselves be escaped, so
 	// the full decoded pattern is checked only after scoped parsing.
-	return bytes.Contains(body, []byte("(")) || bytes.Contains(body, []byte(`\u0028`))
+	return bytes.Contains(body, []byte("(")) || bytes.Contains(body, []byte(`\u0028`)) ||
+		bytes.Contains(body, []byte("p{")) || bytes.Contains(body, []byte("P{"))
 }
 
-func hasRegexLookaround(pattern string) bool {
+// hasUnsupportedRegexConstruct reports whether a JSON Schema pattern uses a
+// construct OpenAI's validator rejects outright with `'<pattern>' is not a
+// 'regex'`: lookaround, or a Unicode property escape (\p{...} / \P{...}, ECMA262
+// u-mode syntax it does not accept). Claude Code's Artifact tool ships both in
+// one pattern, so dropping only lookaround still 400s the whole request.
+func hasUnsupportedRegexConstruct(pattern string) bool {
 	return strings.Contains(pattern, "(?=") || strings.Contains(pattern, "(?!") ||
-		strings.Contains(pattern, "(?<=") || strings.Contains(pattern, "(?<!")
+		strings.Contains(pattern, "(?<=") || strings.Contains(pattern, "(?<!") ||
+		strings.Contains(pattern, `\p{`) || strings.Contains(pattern, `\P{`)
 }
 
 type openAIResponsesToolSchemaOptions struct {
-	removeLookaroundPatterns        bool
+	removeUnsupportedPatterns       bool
 	replaceNullParameterTypes       bool
 	injectObjectUnionRootObjectType bool
 }
@@ -272,8 +280,8 @@ func (p *openAIResponsesToolSchemaParser) parseObject(
 			parameterValueStart = valueStart
 			parameterValueEnd = valueEnd
 		}
-		if context == openAIResponsesToolSchema && openAIResponsesJSONStringEquals(key, "pattern") && p.options.removeLookaroundPatterns {
-			if pattern, ok := decodeOpenAIResponsesJSONStringValue(p.body[valueStart:valueEnd]); ok && hasRegexLookaround(pattern) {
+		if context == openAIResponsesToolSchema && openAIResponsesJSONStringEquals(key, "pattern") && p.options.removeUnsupportedPatterns {
+			if pattern, ok := decodeOpenAIResponsesJSONStringValue(p.body[valueStart:valueEnd]); ok && hasUnsupportedRegexConstruct(pattern) {
 				deleteMember = true
 			}
 		}

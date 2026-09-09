@@ -407,6 +407,20 @@ func TestSanitizeOpenAIResponsesToolSchemaPatterns_RemovesLookaroundOnly(t *test
 	require.Equal(t, "^[a-z]+$", gjson.GetBytes(sanitized, "tools.0.parameters.properties.id.pattern").String())
 }
 
+// Artifact 的 field/favicon 用了 Unicode 属性转义（\p{...} / \P{...}），
+// OpenAI 的 schema 校验器和前瞻一样直接 400，必须一并删掉；
+// 不含属性转义的 asset_id 要原样保留。
+func TestSanitizeOpenAIResponsesToolSchemaPatterns_RemovesUnicodePropertyEscapes(t *testing.T) {
+	body := []byte(`{"tools":[{"type":"function","name":"Artifact","parameters":{"type":"object","properties":{"field":{"type":"string","pattern":"^(?!__.*__$)[^\\p{Cc}\\p{Cf}]{1,200}$"},"favicon":{"type":"string","pattern":"^[^\\P{Cc}]+$"},"asset_id":{"type":"string","pattern":"^[0-9a-f]{32}$"}}}}]}`)
+
+	sanitized, changed, err := sanitizeOpenAIResponsesToolSchemaPatterns(body)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.False(t, gjson.GetBytes(sanitized, "tools.0.parameters.properties.field.pattern").Exists())
+	require.False(t, gjson.GetBytes(sanitized, "tools.0.parameters.properties.favicon.pattern").Exists())
+	require.Equal(t, "^[0-9a-f]{32}$", gjson.GetBytes(sanitized, "tools.0.parameters.properties.asset_id.pattern").String())
+}
+
 func TestSanitizeOpenAIResponsesToolSchemaPatterns_PreservesRawDocumentRepresentation(t *testing.T) {
 	body := []byte("{\n \"number\":1e+999,\n \"tools\":[{\"parameters\":{\"pattern\":\"(?=drop)\", \"description\":\"\\u003ctag\\u003e\", \"type\":\"string\"}}],\n \"tail\":-0.00\n}")
 	want := []byte("{\n \"number\":1e+999,\n \"tools\":[{\"parameters\":{ \"description\":\"\\u003ctag\\u003e\", \"type\":\"string\"}}],\n \"tail\":-0.00\n}")

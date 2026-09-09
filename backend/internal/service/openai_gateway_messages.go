@@ -189,6 +189,15 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		return nil, fmt.Errorf("marshal responses request: %w", err)
 	}
 
+	// 客户端工具 schema 里 OpenAI 不接受的正则（前瞻、\p{...} 属性转义）必须在
+	// 这里清掉：Claude Code 的 Artifact 工具就带这种 pattern，漏掉会让整条请求
+	// 被上游 400，而且账号池里每个账号都会重放同一份坏定义。
+	if sanitizedBody, sanitized, sanitizeErr := sanitizeOpenAIResponsesToolSchemasForPlatform(responsesBody, account.Platform); sanitizeErr != nil {
+		return nil, fmt.Errorf("sanitize responses tool schemas: %w", sanitizeErr)
+	} else if sanitized {
+		responsesBody = sanitizedBody
+	}
+
 	if account.UsesOpenAICodexProtocol() && account.Platform != PlatformGrok {
 		var reqBody map[string]any
 		if err := json.Unmarshal(responsesBody, &reqBody); err != nil {

@@ -186,6 +186,14 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	if normalizedBody, normalized := NormalizeOpenAIReasoningEffortForUpstream(body, upstreamModel); normalized {
 		body = normalizedBody
 	}
+
+	// 与 Responses 路径同理：CC 回退同样把客户端工具 schema 原样带上上游。
+	// 三个调用方都汇到这里，清洗放这一处即可。
+	if sanitizedBody, sanitized, sanitizeErr := sanitizeOpenAIResponsesToolSchemasForPlatform(body, account.Platform); sanitizeErr != nil {
+		return nil, fmt.Errorf("sanitize chat completions tool schemas: %w", sanitizeErr)
+	} else if sanitized {
+		body = sanitizedBody
+	}
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, http.MethodPost, targetURL, bytes.NewReader(body))
 	releaseUpstreamCtx()
