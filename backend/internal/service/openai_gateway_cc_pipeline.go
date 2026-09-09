@@ -177,11 +177,15 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	account *Account,
 	targetURL string,
 	body []byte,
+	upstreamModel string,
 	stream bool,
 	bearerToken string,
 	userAgent string,
 	grokCacheIdentity string,
 ) (*http.Response, error) {
+	if normalizedBody, normalized := NormalizeOpenAIReasoningEffortForUpstream(body, upstreamModel); normalized {
+		body = normalizedBody
+	}
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, http.MethodPost, targetURL, bytes.NewReader(body))
 	releaseUpstreamCtx()
