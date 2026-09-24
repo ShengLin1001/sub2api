@@ -573,6 +573,13 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 			expectedCacheRead: floatPtr(0.03e-6),
 		},
 		{
+			name:              "glm 5.3 flashx",
+			model:             "glm-5.3-flashx",
+			expectedInput:     0.37e-6,
+			expectedOutput:    floatPtr(1.25e-6),
+			expectedCacheRead: floatPtr(0.075e-6),
+		},
+		{
 			name:              "glm 5.2 flagship",
 			model:             "glm-5.2",
 			expectedInput:     1.4e-6,
@@ -669,6 +676,13 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 			expectedInput:     0.15e-6, // = glm-5.3-flash 价格（不是 glm-5.3 的 1.4e-6，更不是 glm-5 的 1e-6）
 			expectedOutput:    floatPtr(0.5e-6),
 			expectedCacheRead: floatPtr(0.03e-6),
+		},
+		{
+			name:              "glm 5.3-flashx vs glm 5.3-flash ordering (verbatim 5.3-flashx)",
+			model:             "glm-5.3-flashx",
+			expectedInput:     0.37e-6, // = glm-5.3-flashx 价格（不是 glm-5.3-flash 的 0.15e-6——它是后者的超串）
+			expectedOutput:    floatPtr(1.25e-6),
+			expectedCacheRead: floatPtr(0.075e-6),
 		},
 		{
 			name:              "glm 5.3 vs glm 5 ordering (verbatim 5.3)",
