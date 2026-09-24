@@ -177,6 +177,7 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	account *Account,
 	targetURL string,
 	body []byte,
+	upstreamModel string,
 	stream bool,
 	bearerToken string,
 	userAgent string,
@@ -187,6 +188,20 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	// 字段，上游 400 "The `reasoning_content` in the thinking mode must be
 	// passed back to the API"。在共用出站点补空格占位，真实明文不覆盖。
 	body = ensureDeepSeekChatReasoningPlaceholders(account, body)
+
+	// 按模型族归一化 reasoning effort：GLM / DeepSeek 走 high/max 原生刻度。
+	// 调用方若已在出站前归一化过，这里命中同值直接返回（幂等）。
+	if normalizedBody, normalized := NormalizeOpenAIReasoningEffortForUpstream(body, upstreamModel); normalized {
+		body = normalizedBody
+	}
+
+	// 与 Responses 路径同理：CC 回退同样把客户端工具 schema 原样带上上游。
+	// 三个调用方都汇到这里，清洗放这一处即可。
+	if sanitizedBody, sanitized, sanitizeErr := sanitizeOpenAIResponsesToolSchemasForPlatform(body, account.Platform); sanitizeErr != nil {
+		return nil, fmt.Errorf("sanitize chat completions tool schemas: %w", sanitizeErr)
+	} else if sanitized {
+		body = sanitizedBody
+	}
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, http.MethodPost, targetURL, bytes.NewReader(body))
 	releaseUpstreamCtx()
