@@ -1608,14 +1608,10 @@ func ApplyThinkingEnabledFallback(effort *string, body []byte, mappedModel strin
 	return DefaultEffortForThinkingEnabled(mappedModel)
 }
 
-// NormalizeGLMOpenAIReasoningEffort rewrites OpenAI Chat Completions
-// reasoning_effort values to the GLM native scale used by z.ai: high/max.
-// It only applies to glm-* mapped models and leaves all other providers untouched.
-func NormalizeGLMOpenAIReasoningEffort(body []byte, mappedModel string) ([]byte, bool) {
-	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(mappedModel)), "glm-") {
-		return body, false
-	}
-
+// NormalizeOpenAIReasoningEffortForUpstream canonicalizes explicit effort values
+// after model mapping. GLM and DeepSeek use a native high/max scale; other model
+// families keep the five Codex catalog levels unchanged.
+func NormalizeOpenAIReasoningEffortForUpstream(body []byte, mappedModel string) ([]byte, bool) {
 	path := "reasoning.effort"
 	raw := strings.TrimSpace(gjson.GetBytes(body, path).String())
 	if raw == "" {
@@ -1626,10 +1622,7 @@ func NormalizeGLMOpenAIReasoningEffort(body []byte, mappedModel string) ([]byte,
 		return body, false
 	}
 
-	mapped := normalizeGLMOpenAIReasoningEffort(raw)
-	if isGLM53Model(mappedModel) && mapped == "high" && normalizeEffortToken(raw) == "low" {
-		mapped = "low"
-	}
+	mapped := normalizeOpenAIReasoningEffortForUpstream(raw, mappedModel)
 	if mapped == "" || mapped == raw {
 		return body, false
 	}
@@ -1650,17 +1643,32 @@ func isGLM53Model(model string) bool {
 	return strings.EqualFold(strings.TrimSpace(model), "glm-5.3")
 }
 
-func normalizeGLMOpenAIReasoningEffort(raw string) string {
+func normalizeOpenAIReasoningEffortForUpstream(raw, mappedModel string) string {
 	value := normalizeEffortToken(raw)
 	if value == "" {
 		return ""
 	}
 
+	model := strings.ToLower(strings.TrimSpace(mappedModel))
+	if strings.HasPrefix(model, "glm-") || strings.HasPrefix(model, "deepseek-") {
+		if isGLM53Model(mappedModel) && value == "low" {
+			return "low"
+		}
+		switch value {
+		case "low", "medium", "high":
+			return "high"
+		case "xhigh", "extrahigh", "max", "ultracode":
+			return "max"
+		default:
+			return ""
+		}
+	}
+
 	switch value {
-	case "low", "medium", "high":
-		return "high"
-	case "xhigh", "extrahigh", "max", "ultracode":
-		return "max"
+	case "low", "medium", "high", "xhigh", "max":
+		return value
+	case "extrahigh":
+		return "xhigh"
 	default:
 		return ""
 	}

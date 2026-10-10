@@ -1370,6 +1370,11 @@ func shouldForwardOpenAIResponsesViaRawChatCompletions(account *Account) bool {
 }
 
 func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Context, account *Account, body []byte, token string, isStream bool, promptCacheKey string, isCodexCLI bool) (*http.Request, error) {
+	upstreamModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
+	if normalizedBody, normalized := NormalizeOpenAIReasoningEffortForUpstream(body, upstreamModel); normalized {
+		body = normalizedBody
+	}
+
 	// Determine target URL based on account type
 	var targetURL string
 	switch account.Type {
