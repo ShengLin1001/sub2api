@@ -110,10 +110,6 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletionsWithStartTime(
 	if upstreamModel != originalModel {
 		upstreamBody = ReplaceModelInBody(body, upstreamModel)
 	}
-	if normalizedBody, normalized := NormalizeGLMOpenAIReasoningEffort(upstreamBody, upstreamModel); normalized {
-		upstreamBody = normalizedBody
-	}
-
 	// 4. Apply OpenAI fast policy on the CC body
 	updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, upstreamBody)
 	if policyErr != nil {
@@ -209,11 +205,17 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletionsWithStartTime(
 	if customUA == "" && account.IsGrokOAuth() {
 		customUA = defaultGrokUpstreamUserAgent()
 	}
+	// 先归一化再提取：usage / 计费记录的等级必须等于真正发往上游的等级
+	// （例如 GLM 的 xhigh 会被转发为 max）。sendCCUpstreamRequest 内部还会
+	// 再归一化一次，此处命中同值直接返回，不重复改写。
+	if normalizedBody, normalized := NormalizeOpenAIReasoningEffortForUpstream(upstreamBody, upstreamModel); normalized {
+		upstreamBody = normalizedBody
+	}
 	// Record the final provider-normalized effort, so usage and pricing match
 	// the outbound request (for example GLM xhigh is forwarded as max).
 	reasoningEffort := extractOpenAIReasoningEffortFromBody(upstreamBody, upstreamModel, billingModel, originalModel)
 	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, upstreamBody, upstreamModel)
-	resp, err := s.sendCCUpstreamRequest(ctx, c, account, targetURL, upstreamBody, clientStream, token, customUA, grokCacheIdentity)
+	resp, err := s.sendCCUpstreamRequest(ctx, c, account, targetURL, upstreamBody, upstreamModel, clientStream, token, customUA, grokCacheIdentity)
 	if err != nil {
 		return nil, err
 	}

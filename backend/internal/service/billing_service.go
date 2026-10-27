@@ -746,6 +746,14 @@ func (s *BillingService) initFallbackPricing() {
 	// GLM-4.6 与 GLM-4.5 在 z.ai 国际版上定价一致；GLM-4.5 国内按 ¥0.8/¥2，汇率换算后约 $0.112/$0.28，与国际版 $0.6/$2.2 不同，本分支采用国际版 USD 口径与现有 Claude/GPT 一致。
 	// GLM-5.3 / GLM-5.2 与 GLM-5.1 在 z.ai 上同价。
 	// GLM-5.3-Flash 列表价 $0.15/$0.50（2026-09-09 前五折促销，此处按列表价，与其它模型口径一致）。
+	// GLM-5.3-FlashX 列表价 $0.37/$1.25（2026-09-23 抓取）；它是 Flash 的加速版（~200 tok/s），
+	// 比 Flash 贵约 2.5 倍。不单列会让 "glm-5.3-flashx" 落进 glm-5.3-flash 分支少计费。
+	s.fallbackPrices["glm-5.3-flashx"] = &ModelPricing{
+		InputPricePerToken:     0.37e-6,  // $0.37 per MTok
+		OutputPricePerToken:    1.25e-6,  // $1.25 per MTok
+		CacheReadPricePerToken: 0.075e-6, // $0.075 per MTok
+		SupportsCacheBreakdown: false,
+	}
 	s.fallbackPrices["glm-5.3-flash"] = &ModelPricing{
 		InputPricePerToken:     0.15e-6, // $0.15 per MTok
 		OutputPricePerToken:    0.5e-6,  // $0.50 per MTok
@@ -1147,10 +1155,14 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	// 匹配策略：长 key 优先（具体模型 → 系列 / 厂商），未知型号不回退以避免误计价。
 	// 与 DeepSeek 一样采用"白名单"语义：未在本表命中的国产模型 alias 一律不返回兜底价。
 
-	// 智谱 GLM（z.ai 公开 SKU：glm-5.3 / glm-5.3-flash / glm-5.2 / glm-5.1 / glm-5 / glm-5-turbo / glm-4.7 / glm-4.6 / glm-4.5 等）
+	// 智谱 GLM（z.ai 公开 SKU：glm-5.3 / glm-5.3-flashx / glm-5.3-flash / glm-5.2 / glm-5.1 / glm-5 / glm-5-turbo / glm-4.7 / glm-4.6 / glm-4.5 等）
 	// 匹配顺序：先判别最高 tier，再依次降级。
 	// 注意：带小数点的型号必须排在裸 "glm-5" 之前，否则会被 strings.Contains 抢走；
-	// glm-5.3-flash 必须排在 glm-5.3 之前（前者包含后者子串）。
+	// glm-5.3-flashx 与 glm-5.3-flash 必须排在 glm-5.3 之前，且 flashx 排在 flash 之前
+	// （前者分别是后者的超串与子串）。
+	if strings.Contains(modelLower, "glm-5.3-flashx") || strings.Contains(modelLower, "glm-5.3flashx") {
+		return s.fallbackPrices["glm-5.3-flashx"]
+	}
 	if strings.Contains(modelLower, "glm-5.3-flash") || strings.Contains(modelLower, "glm-5.3flash") {
 		return s.fallbackPrices["glm-5.3-flash"]
 	}
