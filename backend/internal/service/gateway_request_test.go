@@ -1590,7 +1590,52 @@ func TestApplyThinkingEnabledFallback(t *testing.T) {
 	}
 }
 
-func TestNormalizeGLMOpenAIReasoningEffort(t *testing.T) {
+func TestNormalizeGLM53AnthropicThinking(t *testing.T) {
+	tests := []struct {
+		name          string
+		model         string
+		input         string
+		wantApplied   bool
+		wantEffort    string
+		wantUnchanged bool
+	}{
+		{
+			name:        "explicit low stays low",
+			model:       "GLM-5.3",
+			input:       `{"model":"GLM-5.3","output_config":{"effort":"low"}}`,
+			wantApplied: true,
+			wantEffort:  "low",
+		},
+		{
+			name:        "adaptive maps to high",
+			model:       "glm-5.3",
+			input:       `{"model":"glm-5.3","thinking":{"type":"adaptive"}}`,
+			wantApplied: true,
+			wantEffort:  "high",
+		},
+		{
+			name:          "other model unchanged",
+			model:         "glm-5.2",
+			input:         `{"model":"glm-5.2","output_config":{"effort":"low"}}`,
+			wantUnchanged: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, applied := NormalizeGLM53AnthropicThinking([]byte(tt.input), tt.model)
+			require.Equal(t, tt.wantApplied, applied)
+			if tt.wantUnchanged {
+				require.Equal(t, tt.input, string(got))
+				return
+			}
+			require.Equal(t, "enabled", gjson.GetBytes(got, "thinking.type").String())
+			require.Equal(t, tt.wantEffort, gjson.GetBytes(got, "output_config.effort").String())
+		})
+	}
+}
+
+func TestNormalizeOpenAIReasoningEffortForUpstream(t *testing.T) {
 	tests := []struct {
 		name          string
 		model         string
@@ -1663,9 +1708,56 @@ func TestNormalizeGLMOpenAIReasoningEffort(t *testing.T) {
 			wantUnchanged: true,
 		},
 		{
-			name:          "non glm unchanged",
-			model:         "deepseek-v4-pro",
-			input:         `{"model":"deepseek-v4-pro","reasoning_effort":"xhigh","messages":[]}`,
+			name:        "deepseek low maps to high",
+			model:       "DeepSeek-V4-Flash-0731",
+			input:       `{"model":"DeepSeek-V4-Flash-0731","reasoning_effort":"low","messages":[]}`,
+			wantApplied: true,
+			wantPath:    "reasoning_effort",
+			wantValue:   "high",
+		},
+		{
+			name:        "deepseek medium maps to high",
+			model:       "deepseek-v4-pro-0813",
+			input:       `{"model":"deepseek-v4-pro-0813","reasoning_effort":"medium","messages":[]}`,
+			wantApplied: true,
+			wantPath:    "reasoning_effort",
+			wantValue:   "high",
+		},
+		{
+			name:        "deepseek xhigh maps to max",
+			model:       "deepseek-v4-pro",
+			input:       `{"model":"deepseek-v4-pro","reasoning_effort":"xhigh","messages":[]}`,
+			wantApplied: true,
+			wantPath:    "reasoning_effort",
+			wantValue:   "max",
+		},
+		{
+			name:        "deepseek ultracode maps to max",
+			model:       "deepseek-v4-pro",
+			input:       `{"model":"deepseek-v4-pro","reasoning":{"effort":"ultracode"},"messages":[]}`,
+			wantApplied: true,
+			wantPath:    "reasoning.effort",
+			wantValue:   "max",
+		},
+		{
+			name:        "kimi x-high canonicalizes without promotion",
+			model:       "Kimi-K3",
+			input:       `{"model":"Kimi-K3","reasoning":{"effort":"X-HIGH"},"messages":[]}`,
+			wantApplied: true,
+			wantPath:    "reasoning.effort",
+			wantValue:   "xhigh",
+		},
+		{
+			name:          "xhigh capable model unchanged",
+			model:         "gpt-5.6-sol",
+			input:         `{"model":"gpt-5.6-sol","reasoning":{"effort":"xhigh"},"messages":[]}`,
+			wantApplied:   false,
+			wantUnchanged: true,
+		},
+		{
+			name:          "unknown model xhigh unchanged",
+			model:         "future-reasoning-model",
+			input:         `{"model":"future-reasoning-model","reasoning_effort":"xhigh","messages":[]}`,
 			wantApplied:   false,
 			wantUnchanged: true,
 		},
@@ -1683,11 +1775,18 @@ func TestNormalizeGLMOpenAIReasoningEffort(t *testing.T) {
 			wantApplied:   false,
 			wantUnchanged: true,
 		},
+		{
+			name:          "deepseek unknown effort unchanged",
+			model:         "deepseek-v4-pro",
+			input:         `{"model":"deepseek-v4-pro","reasoning_effort":"banana","messages":[]}`,
+			wantApplied:   false,
+			wantUnchanged: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, applied := NormalizeGLMOpenAIReasoningEffort([]byte(tt.input), tt.model)
+			got, applied := NormalizeOpenAIReasoningEffortForUpstream([]byte(tt.input), tt.model)
 			require.Equal(t, tt.wantApplied, applied)
 			if tt.wantUnchanged {
 				require.Equal(t, tt.input, string(got))
